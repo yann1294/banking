@@ -1,16 +1,12 @@
-"use server";
+'use server';
 
 import { ID } from "node-appwrite";
-import { createAdminClient, createSessionClient } from "../server/appwrite";
+import { createAdminClient, createSessionClient } from "../appwrite";
 import { cookies } from "next/headers";
 import { encryptId, extractCustomerIdFromUrl, parseStringify } from "../utils";
-import {
-  CountryCode,
-  ProcessorTokenCreateRequest,
-  ProcessorTokenCreateRequestProcessorEnum,
-  Products,
-} from "plaid";
-import { plaidClient } from "../plaid";
+import { CountryCode, ProcessorTokenCreateRequest, ProcessorTokenCreateRequestProcessorEnum, Products } from "plaid";
+
+import { plaidClient } from '@/lib/plaid';
 import { revalidatePath } from "next/cache";
 import { addFundingSource, createDwollaCustomer } from "./dwolla.actions";
 
@@ -18,43 +14,43 @@ const {
   APPWRITE_DATABASE_ID: DATABASE_ID,
   APPWRITE_USER_COLLECTION_ID: USER_COLLECTION_ID,
   APPWRITE_BANK_COLLECTION_ID: BANK_COLLECTION_ID,
-  APPWRITE_TRANSACTION_COLLECTION_ID: TRANSACTION_COLLECTION_ID,
 } = process.env;
 
 export const signIn = async ({ email, password }: signInProps) => {
   try {
-    // Mutation / Database / Make fetch
     const { account } = await createAdminClient();
+
     const response = await account.createEmailPasswordSession(email, password);
+
     return parseStringify(response);
   } catch (error) {
-    console.log("Error", error);
+    console.error('Error', error);
   }
-};
+}
 
 export const signUp = async ({ password, ...userData }: SignUpParams) => {
   const { email, firstName, lastName } = userData;
-
+  
   let newUserAccount;
 
   try {
     const { account, database } = await createAdminClient();
 
     newUserAccount = await account.create(
-      ID.unique(),
-      email,
-      password,
-      `${firstName} ${lastName}`,
+      ID.unique(), 
+      email, 
+      password, 
+      `${firstName} ${lastName}`
     );
 
-    if (!newUserAccount) throw new Error("Error creating user");
+    if(!newUserAccount) throw new Error('Error creating user')
 
     const dwollaCustomerUrl = await createDwollaCustomer({
       ...userData,
-      type: "personal",
-    });
+      type: 'personal'
+    })
 
-    if (!dwollaCustomerUrl) throw new Error("Error creating Dwolla customer");
+    if(!dwollaCustomerUrl) throw new Error('Error creating Dwolla customer')
 
     const dwollaCustomerId = extractCustomerIdFromUrl(dwollaCustomerUrl);
 
@@ -66,9 +62,9 @@ export const signUp = async ({ password, ...userData }: SignUpParams) => {
         ...userData,
         userId: newUserAccount.$id,
         dwollaCustomerId,
-        dwollaCustomerUrl,
-      },
-    );
+        dwollaCustomerUrl
+      }
+    )
 
     const session = await account.createEmailPasswordSession(email, password);
 
@@ -81,17 +77,19 @@ export const signUp = async ({ password, ...userData }: SignUpParams) => {
 
     return parseStringify(newUser);
   } catch (error) {
-    console.error("Error", error);
+    console.error('Error', error);
   }
-};
-// ... your initilization functions
+}
 
 export async function getLoggedInUser() {
   try {
     const { account } = await createSessionClient();
+
     const user = await account.get();
+
     return parseStringify(user);
   } catch (error) {
+    console.log(error)
     return null;
   }
 }
@@ -99,44 +97,34 @@ export async function getLoggedInUser() {
 export const logoutAccount = async () => {
   try {
     const { account } = await createSessionClient();
-    cookies().delete("my-custom-session");
-    await account.deleteSession("current");
+
+    cookies().delete('appwrite-session');
+
+    await account.deleteSession('current');
   } catch (error) {
     return null;
   }
-};
-
-interface LinkTokenResponse {
-  linkToken: string;
 }
 
-export const createLinkToken = async (
-  user: User,
-): Promise<LinkTokenResponse | undefined> => {
+export const createLinkToken = async (user: User) => {
   try {
     const tokenParams = {
       user: {
-        client_user_id: user.$id,
+        client_user_id: user.$id
       },
       client_name: `${user.firstName} ${user.lastName}`,
-      products: ["auth"] as Products[],
-      language: "en",
-      country_codes: ["US"] as CountryCode[],
-    };
-
-    const response = await plaidClient.linkTokenCreate(tokenParams);
-    const linkToken = parseStringify(response.data.link_token);
-
-    if (typeof linkToken !== "string") {
-      throw new Error("Invalid link token received");
+      products: ['auth'] as Products[],
+      language: 'en',
+      country_codes: ['US'] as CountryCode[],
     }
 
-    return { linkToken };
+    const response = await plaidClient.linkTokenCreate(tokenParams);
+
+    return parseStringify({ linkToken: response.data.link_token })
   } catch (error) {
-    console.error("Error creating link token:", error);
-    return undefined;
+    console.log(error);
   }
-};
+}
 
 export const createBankAccount = async ({
   userId,
@@ -144,25 +132,30 @@ export const createBankAccount = async ({
   accountId,
   accessToken,
   fundingSourceUrl,
-  shareableId,
+  sharableId,
 }: createBankAccountProps) => {
-  const { database } = await createAdminClient();
+  try {
+    const { database } = await createAdminClient();
 
-  const bankAccount = await database.createDocument(
-    DATABASE_ID!,
-    BANK_COLLECTION_ID!,
-    ID.unique(),
-    {
-      userId,
-      bankId,
-      accountId,
-      accessToken,
-      fundingSourceUrl,
-      shareableId,
-    },
-  );
-  return parseStringify(bankAccount);
-};
+    const bankAccount = await database.createDocument(
+      DATABASE_ID!,
+      BANK_COLLECTION_ID!,
+      ID.unique(),
+      {
+        userId,
+        bankId,
+        accountId,
+        accessToken,
+        fundingSourceUrl,
+        sharableId,
+      }
+    )
+
+    return parseStringify(bankAccount);
+  } catch (error) {
+    
+  }
+}
 
 export const exchangePublicToken = async ({
   publicToken,
@@ -176,7 +169,7 @@ export const exchangePublicToken = async ({
 
     const accessToken = response.data.access_token;
     const itemId = response.data.item_id;
-
+    
     // Get account information from Plaid using the access token
     const accountsResponse = await plaidClient.accountsGet({
       access_token: accessToken,
@@ -191,30 +184,30 @@ export const exchangePublicToken = async ({
       processor: "dwolla" as ProcessorTokenCreateRequestProcessorEnum,
     };
 
-    const processorTokenResponse =
-      await plaidClient.processorTokenCreate(request);
+    const processorTokenResponse = await plaidClient.processorTokenCreate(request);
     const processorToken = processorTokenResponse.data.processor_token;
 
-    // Create a funding source URL for the account using the Dwolla customer ID, processor tokem, and bank name
-    const fundingSourceUrl = await addFundingSource({
+     // Create a funding source URL for the account using the Dwolla customer ID, processor token, and bank name
+     const fundingSourceUrl = await addFundingSource({
       dwollaCustomerId: user.dwollaCustomerId,
       processorToken,
       bankName: accountData.name,
     });
-
+    
     // If the funding source URL is not created, throw an error
     if (!fundingSourceUrl) throw Error;
 
-    // Create a bank account using the user ID, item ID, account ID, access token funding source URL, and sharable ID
+    // Create a bank account using the user ID, item ID, account ID, access token, funding source URL, and sharable ID
     await createBankAccount({
       userId: user.$id,
       bankId: itemId,
       accountId: accountData.account_id,
       accessToken,
       fundingSourceUrl,
-      shareableId: encryptId(accountData.account_id),
+      sharableId: encryptId(accountData.account_id),
     });
-    // Revallidate the path to reflect the changes
+
+    // Revalidate the path to reflect the changes
     revalidatePath("/");
 
     // Return a success message
@@ -222,6 +215,6 @@ export const exchangePublicToken = async ({
       publicTokenExchange: "complete",
     });
   } catch (error) {
-    console.log(error);
+    console.error("An error occurred while creating exchanging token:", error);
   }
-};
+}
